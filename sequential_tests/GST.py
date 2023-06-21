@@ -42,10 +42,6 @@ class GGST(GST):
     name: str, default="PK"
         name of the boundary used. "PK" for Pocock, "OF" for O'Brien-Fleming, numerical value
         use the lan-demetz level-spending functions.
-        name values of 1 and 2 correspond to alpha spending functions which give O’Brien Fleming and
-        Pocock type boundaries, respectively. A value of 3 is the power family. Here, the spending function
-        is αtφ, where φ must be greater than 0. A value of 4 is the Hwang-Shih-DeCani family, with
-        spending function α(1 − e−φt)/(1 − e−φ), where φ cannot be 0.
     sigma: float, default=1
         std of the samples. Unused if student_approx = True (the default).
     drift: float, default=True
@@ -161,40 +157,4 @@ class GGST(GST):
 
     def get_ck(self, k):
         return self.boundary[k]
-
-    # def draw_region(self, ax=None):
-    #     """
-    #     Plot the rejection region into the axis ax. If ax is None, create an axis.
-    #     """
-    #     assert not self.student_approx, "region for student is not defined properly"
-
-    #     x = np.arange(1, self.n_groups + 1) / self.n_groups
-    #     y = self.boundary
-
-    #     if ax is None:
-    #         fig, ax = plt.subplots()
-
-    #     if not ax.lines:
-    #         p1 = ax.plot(
-    #             x,
-    #             stats.norm.ppf(self.alpha / 2) * np.ones(self.n_groups),
-    #             "--",
-    #             label="Non seq test",
-    #             alpha=0.7,
-    #         )
-    #         ax.plot(
-    #             x,
-    #             -stats.norm.ppf(self.alpha / 2) * np.ones(self.n_groups),
-    #             "--",
-    #             color=p1[0].get_color(),
-    #             alpha=0.7,
-    #         )
-
-    #     p2 = ax.plot(x, y, "o-", label="Seq test " + self.name, alpha=0.7)
-    #     ax.plot(x, -np.array(y), "o-", color=p2[0].get_color(), alpha=0.7)
-
-    #     plt.legend()
-    #     plt.xlabel("portion of sample size")
-    #     plt.ylabel("Z-stat")
-    #     return y
 
