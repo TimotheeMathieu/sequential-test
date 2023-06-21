@@ -32,16 +32,16 @@ class GGST(GST):
     ----------
 
     n_groups: int
-        maximum number of interims. If None, use pow to infer it.
+        maximum number of interims. If None, use power to infer it.
     size_group: int
         size of a block. Used if env is None.
     alpha: float, default=0.05
-        level of the test
+        level of the test.
     power: float, default=0.9
-        If K is None, power of the test.
+        If n_groups is None, power of the test.
     name: str, default="PK"
         name of the boundary used. "PK" for Pocock, "OF" for O'Brien-Fleming, numerical value
-        use the lan-demetz level-spending functions.
+        use the lan-demetz level-spending functions pre-computed using ldbounds R library.
     sigma: float, default=1
         std of the samples. Unused if student_approx = True (the default).
     drift: float, default=True
