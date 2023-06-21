@@ -3,14 +3,15 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from scipy import stats
 from tqdm import tqdm
-from statsmodels.stats.power import tt_ind_solve_power as power_tt
 from tqdm import tqdm
 
 import logging
 from pathlib import Path
 import os
-
 import itertools
+
+
+LIB_DIR = os.path.dirname(__file__)
 
 class GST():
     """
@@ -46,9 +47,12 @@ class GGST(GST):
         is αtφ, where φ must be greater than 0. A value of 4 is the Hwang-Shih-DeCani family, with
         spending function α(1 − e−φt)/(1 − e−φ), where φ cannot be 0.
     sigma: float, default=1
-        std of the samples. Unused if student_approx = True
-    student_approx: bool, default=False
-        if True, use studentized Z-score and student ppf, this is a a heuristic and may have level different from alpha
+        std of the samples. Unused if student_approx = True (the default).
+    drift: float, default=True
+        multiplicative factor of the std used for the drift when computing number of interims to achieve a given
+        power when n_groups = None.
+    student_approx: bool, default=True
+        if True, use studentized Z-score and student ppf, this is a a heuristic and may have level different from alpha.
 
     Examples
     --------
@@ -64,6 +68,11 @@ class GGST(GST):
     >>>    if test.decision == "reject":
     >>>        break
     >>> print("Decision is ", test.decision)
+
+    Remarks
+    -------
+
+    If you have to make a large number of tests, do not reinstantiate the test each time instead use test.reset() which is a lot faster.
     """
 
     def __init__(
@@ -74,49 +83,55 @@ class GGST(GST):
         power=0.9,
         name="PK",
         sigma=1,
-        student_approx=False,
-        boundary=None,
-        **kwargs
+        drift=1,
+        student_approx=True,
     ):
 
+        self.name = name
         self.alpha = alpha
-        self.n = size_group
-
-        if K is None:
-            K_ = self._find_K_power(power)
+        self.size_group = size_group
+        if n_groups is None:
+            n_groups_ = self._find_K_power(power, drift)
         else:
-            K_ = n_groups
-            
-        self.K = K_
-        GST.__init__(self, self.K, self.n, self.alpha)
+            n_groups_ = n_groups
+
+        GST.__init__(self, n_groups = n_groups_ , size_group = size_group, alpha = alpha)
 
         self.decision = "accept"
         self.student_approx = student_approx
         self.sigma = sigma  # Only used if student_approx == False
         self.k = 0
+        self.get_boundary()
 
-    def _find_K_power(self, power):
-        # Find K such that the power is at least `power` at a drift of one time the std.
-        df = pd.read_csv("power_dataframe.csv")
-        df = df.loc[df["name"] == self.bname]
+    def _find_K_power(self, power, drift = 1):
+        df = pd.read_csv(os.path.join(LIB_DIR,"power_dataframe.csv"))
+        df = df.loc[df["name"] == self.name]
         df = df.loc[np.abs(df["alpha"] - self.alpha) < 1e-5]
-        df = df.loc[df["n"] == self.n]
-        df = df.sort_values(by="K")
-        Ks = df["K"].values
-        print(df)
+        df = df.loc[df["size_group"] == self.size_group]
+        df = df.loc[df["drift"] == drift]
+        df = df.sort_values(by="n_groups")
+        Ks = df["n_groups"].values
         powers = df["power"].values
+        assert np.sum(powers > power)>0, "Please choose a larger drift or a larger size_group"
         return Ks[np.min(np.where(powers > power))]
 
-    def get_boundary(self, alpha, K):
-        df = pd.read_csv("boundaries.csv", sep=";")
-        df = df.loc[df["name"] == self.bname]
-        df = df.loc[df["K"] == K]
-        df = df.loc[np.abs(df["alpha"] - alpha) < 1e-5]  # allow for small approximation
+    def get_boundary(self):
+        
+        df = pd.read_csv(os.path.join(LIB_DIR,"boundaries.csv"), sep=";")
+        df = df.loc[df["name"] == self.name]
+        df = df.loc[df["K"] == self.n_groups]
+        
+        df = df.loc[np.abs(df["alpha"] - self.alpha) < 1e-5]  # allow for small approximation
         if len(df) == 0:
-            raise NotImplemented("The boundary for the specified values of alpha and K has not been computed")
+            raise NotImplementedError("The boundary for the specified values of alpha and K has not been computed")
         else:
-            self.boundary = df
+            df = df.sort_values("t", axis=0)
+            self.boundary = df["up"].values # symmetric boundaries, we need only the upper bound
         return df
+
+    def reset(self):
+        self.k = 0
+        self.decision = "accept"
 
     def step(self, X, Y):
         k = self.k
@@ -135,10 +150,11 @@ class GGST(GST):
         if not self.student_approx:
             threshold = ck
         else:
-            dof = 2 * len(X) - 2 # number of degrees of freedom, use
-            threshold = -stats.t.ppf(q=1 - stats.norm.cdf(ck), df=dof)
+            dof = 2 * len(X) - 2 # number of degrees of freedom we use
+            threshold = -stats.t.ppf(q = 1 - stats.norm.cdf(ck), df=dof)
 
-        self.n_iter = (k + 1) * self.n
+        self.n_iter = (k + 1) * self.size_group
+
         if np.abs(Zk) > threshold:
             self.decision = "reject"
         self.k += 1
@@ -146,39 +162,39 @@ class GGST(GST):
     def get_ck(self, k):
         return self.boundary[k]
 
-    def draw_region(self, ax=None):
-        """
-        Plot the rejection region into the axis ax. If ax is None, create an axis.
-        """
-        assert not self.student_approx, "region for student is not defined properly"
+    # def draw_region(self, ax=None):
+    #     """
+    #     Plot the rejection region into the axis ax. If ax is None, create an axis.
+    #     """
+    #     assert not self.student_approx, "region for student is not defined properly"
 
-        x = np.arange(1, self.K + 1) / self.K
-        y = self.boundary
+    #     x = np.arange(1, self.n_groups + 1) / self.n_groups
+    #     y = self.boundary
 
-        if ax is None:
-            fig, ax = plt.subplots()
+    #     if ax is None:
+    #         fig, ax = plt.subplots()
 
-        if not ax.lines:
-            p1 = ax.plot(
-                x,
-                stats.norm.ppf(self.alpha / 2) * np.ones(self.K),
-                "--",
-                label="Non seq test",
-                alpha=0.7,
-            )
-            ax.plot(
-                x,
-                -stats.norm.ppf(self.alpha / 2) * np.ones(self.K),
-                "--",
-                color=p1[0].get_color(),
-                alpha=0.7,
-            )
+    #     if not ax.lines:
+    #         p1 = ax.plot(
+    #             x,
+    #             stats.norm.ppf(self.alpha / 2) * np.ones(self.n_groups),
+    #             "--",
+    #             label="Non seq test",
+    #             alpha=0.7,
+    #         )
+    #         ax.plot(
+    #             x,
+    #             -stats.norm.ppf(self.alpha / 2) * np.ones(self.n_groups),
+    #             "--",
+    #             color=p1[0].get_color(),
+    #             alpha=0.7,
+    #         )
 
-        p2 = ax.plot(x, y, "o-", label="Seq test " + self.bname, alpha=0.7)
-        ax.plot(x, -np.array(y), "o-", color=p2[0].get_color(), alpha=0.7)
+    #     p2 = ax.plot(x, y, "o-", label="Seq test " + self.name, alpha=0.7)
+    #     ax.plot(x, -np.array(y), "o-", color=p2[0].get_color(), alpha=0.7)
 
-        plt.legend()
-        plt.xlabel("portion of sample size")
-        plt.ylabel("Z-stat")
-        return y
+    #     plt.legend()
+    #     plt.xlabel("portion of sample size")
+    #     plt.ylabel("Z-stat")
+    #     return y
 
